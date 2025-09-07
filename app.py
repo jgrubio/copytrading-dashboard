@@ -1,0 +1,232 @@
+from flask import Flask, render_template, request, jsonify, send_file
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import json
+import os
+from datetime import datetime
+import io
+import base64
+
+app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+
+# Configurar carpeta de uploads
+UPLOAD_FOLDER = 'uploads'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if not file.filename.endswith('.csv'):
+        return jsonify({'error': 'Only CSV files are allowed'}), 400
+    
+    try:
+        # Leer el archivo CSV
+        df = pd.read_csv(file)
+        
+        # Validar que tenga las columnas necesarias
+        required_columns = ['ID', 'Instrumentos', 'Horario de apertura', 'Precio de apertura', 
+                           'Precio de cierre', 'Utilidad', 'Razón']
+        
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return jsonify({'error': f'Missing required columns: {missing_columns}'}), 400
+        
+        # Procesar los datos
+        analysis_data = process_trading_data(df)
+        
+        return jsonify(analysis_data)
+        
+    except Exception as e:
+        return jsonify({'error': f'Error processing file: {str(e)}'}), 500
+
+def process_trading_data(df):
+    """Procesa los datos de trading y genera análisis"""
+    
+    # Convertir fechas con manejo de errores
+    df['Horario de apertura'] = pd.to_datetime(df['Horario de apertura'], errors='coerce', format='mixed')
+    df['Hora de cierre'] = pd.to_datetime(df['Hora de cierre'], errors='coerce', format='mixed')
+    
+    # Filtrar solo filas con fechas válidas
+    df_valid = df.dropna(subset=['Horario de apertura', 'Hora de cierre'])
+    
+    
+    # Extraer mes y año
+    df_valid['Mes'] = df_valid['Horario de apertura'].dt.to_period('M')
+    df_valid['Año'] = df_valid['Horario de apertura'].dt.year
+    
+    # Calcular métricas por mes
+    monthly_stats = df_valid.groupby('Mes').agg({
+        'Utilidad': ['sum', 'count', 'mean'],
+        'ID': 'count'
+    }).round(2)
+    
+    monthly_stats.columns = ['Ganancia/Pérdida Total', 'Número Operaciones', 'Ganancia/Pérdida Promedio', 'Total Operaciones']
+    monthly_stats = monthly_stats.reset_index()
+    monthly_stats['Mes'] = monthly_stats['Mes'].astype(str)
+    
+    # Calcular métricas por instrumento
+    instrument_stats = df_valid.groupby('Instrumentos').agg({
+        'Utilidad': ['sum', 'count', 'mean']
+    }).round(2)
+    
+    instrument_stats.columns = ['Ganancia/Pérdida Total', 'Número Operaciones', 'Ganancia/Pérdida Promedio']
+    instrument_stats = instrument_stats.reset_index()
+    
+    # Calcular totales para la fila de sumatorio
+    instrument_totals = {
+        'Instrumentos': 'TOTAL',
+        'Ganancia/Pérdida Total': instrument_stats['Ganancia/Pérdida Total'].sum(),
+        'Número Operaciones': instrument_stats['Número Operaciones'].sum(),
+        'Ganancia/Pérdida Promedio': instrument_stats['Ganancia/Pérdida Total'].sum() / instrument_stats['Número Operaciones'].sum() if instrument_stats['Número Operaciones'].sum() > 0 else 0
+    }
+    
+    # Agregar la fila de totales al final
+    instrument_stats = pd.concat([instrument_stats, pd.DataFrame([instrument_totals])], ignore_index=True)
+    
+    
+    # Calcular métricas por razón de cierre
+    reason_stats = df_valid.groupby('Razón').agg({
+        'Utilidad': ['sum', 'count', 'mean']
+    }).round(2)
+    
+    reason_stats.columns = ['Ganancia/Pérdida Total', 'Número Operaciones', 'Ganancia/Pérdida Promedio']
+    reason_stats = reason_stats.reset_index()
+    
+    # Métricas generales
+    total_operations = len(df_valid)
+    total_profit = df_valid['Utilidad'].sum()
+    winning_trades = len(df_valid[df_valid['Utilidad'] > 0])
+    losing_trades = len(df_valid[df_valid['Utilidad'] < 0])
+    win_rate = (winning_trades / total_operations) * 100 if total_operations > 0 else 0
+    
+    # Calcular costos adicionales
+    total_swap = df_valid['Swap'].sum()
+    
+    # Generar gráficos
+    charts = generate_charts(df_valid, monthly_stats, instrument_stats, reason_stats)
+    
+    return {
+        'summary': {
+            'total_operations': total_operations,
+            'total_profit': round(total_profit, 2),
+            'winning_trades': winning_trades,
+            'losing_trades': losing_trades,
+            'win_rate': round(win_rate, 2),
+            'total_swap': round(total_swap, 2)
+        },
+        'monthly_stats': monthly_stats.to_dict('records'),
+        'instrument_stats': instrument_stats.to_dict('records'),
+        'reason_stats': reason_stats.to_dict('records'),
+        'charts': charts
+    }
+
+def generate_charts(df, monthly_stats, instrument_stats, reason_stats):
+    """Genera los gráficos de análisis"""
+    
+    # 1. Gráfico de ganancia/pérdida por instrumento
+    # Ordenar por ganancia/pérdida total descendente y excluir la fila TOTAL
+    instrument_stats_for_chart = instrument_stats[instrument_stats['Instrumentos'] != 'TOTAL'].copy()
+    instrument_stats_sorted = instrument_stats_for_chart.sort_values('Ganancia/Pérdida Total', ascending=False)
+    
+    fig_instrument = px.bar(
+        instrument_stats_sorted.head(15),  # Top 15 instrumentos
+        x='Instrumentos',
+        y='Ganancia/Pérdida Total',
+        title='Ganancia/Pérdida Total por Instrumento (Top 15)',
+        color='Ganancia/Pérdida Total',
+        color_continuous_scale='RdYlGn',
+        height=500
+    )
+    
+    fig_instrument.update_layout(
+        xaxis_title='Instrumento',
+        yaxis_title='Ganancia/Pérdida Total ($)',
+        showlegend=False,
+        xaxis={'tickangle': 45}
+    )
+    
+    # 2. Gráfico de evolución temporal
+    df_sorted = df.sort_values('Horario de apertura').copy()
+    df_sorted['Ganancia/Pérdida Acumulada'] = df_sorted['Utilidad'].cumsum()
+    
+    fig_evolution = px.line(
+        df_sorted,
+        x='Horario de apertura',
+        y='Ganancia/Pérdida Acumulada',
+        title='Evolución de Ganancia/Pérdida Acumulada en el Tiempo',
+        height=500
+    )
+    
+    fig_evolution.update_layout(
+        xaxis_title='Fecha',
+        yaxis_title='Ganancia/Pérdida Acumulada ($)',
+        showlegend=False,
+        hovermode='x unified'
+    )
+    
+    # Agregar línea horizontal en y=0 para referencia
+    fig_evolution.add_hline(y=0, line_dash="dash", line_color="red", opacity=0.5)
+    
+    # Convertir gráficos a JSON con datos explícitos
+    charts = {
+        'instrument': {
+            'data': [{
+                'x': instrument_stats_sorted.head(15)['Instrumentos'].tolist(),
+                'y': instrument_stats_sorted.head(15)['Ganancia/Pérdida Total'].tolist(),
+                'type': 'bar',
+                'marker': {
+                    'color': instrument_stats_sorted.head(15)['Ganancia/Pérdida Total'].tolist(),
+                    'colorscale': 'RdYlGn'
+                }
+            }],
+            'layout': {
+                'title': 'Ganancia/Pérdida Total por Instrumento (Top 15)',
+                'xaxis': {'title': 'Instrumento', 'tickangle': 45},
+                'yaxis': {'title': 'Ganancia/Pérdida Total ($)'},
+                'height': 500
+            }
+        },
+        'evolution': {
+            'data': [{
+                'x': df_sorted['Horario de apertura'].dt.strftime('%Y-%m-%d %H:%M:%S').tolist(),
+                'y': df_sorted['Ganancia/Pérdida Acumulada'].tolist(),
+                'type': 'scatter',
+                'mode': 'lines',
+                'name': 'Ganancia/Pérdida Acumulada'
+            }],
+            'layout': {
+                'title': 'Evolución de Ganancia/Pérdida Acumulada en el Tiempo',
+                'xaxis': {'title': 'Fecha'},
+                'yaxis': {'title': 'Ganancia/Pérdida Acumulada ($)'},
+                'height': 500,
+                'shapes': [{
+                    'type': 'line',
+                    'x0': df_sorted['Horario de apertura'].min(),
+                    'x1': df_sorted['Horario de apertura'].max(),
+                    'y0': 0,
+                    'y1': 0,
+                    'line': {'color': 'red', 'dash': 'dash', 'opacity': 0.5}
+                }]
+            }
+        }
+    }
+    
+    return charts
+
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
