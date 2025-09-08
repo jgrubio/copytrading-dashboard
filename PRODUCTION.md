@@ -245,3 +245,28 @@ Si encuentras problemas:
 - **Aplicación**: `http://tu-servidor:5000`
 - **Health Check**: `http://tu-servidor:5000/` (debe devolver HTML)
 - **API de archivos**: `http://tu-servidor:5000/files`
+- **API de PDF**: `http://tu-servidor:5000/generate_pdf` (POST)
+
+## 📄 Funcionalidad de PDF
+
+La aplicación incluye funcionalidad para generar reportes en PDF que incluyen:
+
+- **Resumen de métricas**: Total de operaciones, ganancia/pérdida, porcentaje de éxito
+- **Gráficos**: Ganancia/pérdida por instrumento y evolución temporal
+- **Tablas detalladas**: Estadísticas por mes e instrumento
+- **Diseño profesional**: Formato A4 con colores corporativos
+
+### Dependencias adicionales para PDF
+
+Las siguientes dependencias se instalan automáticamente en producción:
+
+- `reportlab>=4.0.0`: Generación de PDFs
+- `Pillow>=10.0.0`: Procesamiento de imágenes
+- `kaleido>=0.2.1`: Conversión de gráficos Plotly a imágenes
+
+### Uso de la funcionalidad PDF
+
+1. Sube un archivo CSV de trading
+2. Ve el análisis en la web
+3. Haz clic en "Descargar Análisis en PDF"
+4. El PDF se descarga automáticamente con toda la información

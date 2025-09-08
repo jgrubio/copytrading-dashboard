@@ -273,7 +273,7 @@ def generate_charts(df, monthly_stats, instrument_stats, reason_stats):
                     'x1': df_sorted['Horario de apertura'].max(),
                     'y0': 0,
                     'y1': 0,
-                    'line': {'color': 'red', 'dash': 'dash', 'opacity': 0.5}
+                    'line': {'color': 'red', 'dash': 'dash'}
                 }]
             }
         }
