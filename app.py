@@ -9,11 +9,45 @@ from datetime import datetime
 import io
 import base64
 
-app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+def create_app():
+    app = Flask(__name__)
+    
+    # Configuración de producción
+    app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+    
+    # Configuración para nginx
+    app.config['PREFERRED_URL_SCHEME'] = 'https' if os.environ.get('HTTPS', 'false').lower() == 'true' else 'http'
+    
+    # Configuraciones de seguridad
+    app.config['SESSION_COOKIE_SECURE'] = os.environ.get('HTTPS', 'false').lower() == 'true'
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    
+    # Configuración de headers de seguridad
+    @app.after_request
+    def set_security_headers(response):
+        # Prevenir clickjacking
+        response.headers['X-Frame-Options'] = 'DENY'
+        # Prevenir MIME type sniffing
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        # Habilitar XSS protection
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+        # Política de referrer
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        
+        # Solo agregar HSTS si usamos HTTPS
+        if os.environ.get('HTTPS', 'false').lower() == 'true':
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+        
+        return response
+    
+    return app
+
+app = create_app()
 
 # Configurar carpeta de uploads
-UPLOAD_FOLDER = 'uploads'
+UPLOAD_FOLDER = os.environ.get('UPLOAD_FOLDER', 'uploads')
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
@@ -32,6 +66,10 @@ def upload_file():
     
     if not file.filename.endswith('.csv'):
         return jsonify({'error': 'Only CSV files are allowed'}), 400
+    
+    # Validación adicional de seguridad
+    if not file.filename or '..' in file.filename or '/' in file.filename:
+        return jsonify({'error': 'Invalid filename'}), 400
     
     try:
         # Generar nombre único para el archivo
@@ -291,4 +329,9 @@ def delete_file(filename):
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Configuración para desarrollo
+    debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    port = int(os.environ.get('PORT', 5000))
+    host = os.environ.get('HOST', '0.0.0.0')
+    
+    app.run(debug=debug_mode, host=host, port=port)

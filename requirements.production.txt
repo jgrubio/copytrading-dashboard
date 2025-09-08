@@ -1,0 +1,11 @@
+# Dependencias para producción
+Flask>=3.0.0
+pandas>=2.2.0
+plotly>=5.18.0
+python-dateutil>=2.8.0
+
+# Servidor WSGI para producción
+gunicorn>=21.2.0
+
+# Utilidades adicionales para producción
+python-dotenv>=1.0.0

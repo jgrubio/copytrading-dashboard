@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # Aplicación principal
+  copytrading-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: copytrading-dashboard
+    restart: unless-stopped
+    ports:
+      - "${EXTERNAL_PORT:-5000}:5000"
+    environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=false
+      - SECRET_KEY=${SECRET_KEY:-copytrading-dashboard-secret-key-2024-change-this}
+      - HOST=0.0.0.0
+      - PORT=5000
+      - HTTPS=${HTTPS:-false}
+      - UPLOAD_FOLDER=/app/uploads
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      # Volumen persistente para archivos subidos
+      - uploads_data:/app/uploads
+      # Volumen para logs
+      - logs_data:/app/logs
+    networks:
+      - copytrading-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Servicio de limpieza de archivos antiguos (opcional)
+  cleanup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: copytrading-cleanup
+    restart: "no"
+    environment:
+      - UPLOAD_FOLDER=/app/uploads
+      - CLEANUP_DAYS=${CLEANUP_DAYS:-30}
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - copytrading-network
+    command: >
+      sh -c "
+        echo 'Iniciando limpieza de archivos antiguos...' &&
+        find /app/uploads -name '*.csv' -mtime +$${CLEANUP_DAYS:-30} -delete &&
+        echo 'Limpieza completada'
+      "
+    profiles:
+      - maintenance
+
+# Volúmenes persistentes
+volumes:
+  uploads_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${UPLOAD_PATH:-./uploads}
+  logs_data:
+    driver: local
+
+# Red personalizada
+networks:
+  copytrading-network:
+    driver: bridge
