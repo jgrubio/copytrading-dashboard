@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Análisis de Trading Galáctico - Dashboard</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            margin: 20px;
+            padding: 30px;
+        }
+        
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            background: rgba(102, 126, 234, 0.05);
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: rgba(118, 75, 162, 0.1);
+            transform: translateY(-2px);
+        }
+        
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: rgba(118, 75, 162, 0.2);
+        }
+        
+        .stats-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 10px 0;
+            text-align: center;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .stats-card h3 {
+            font-size: 2rem;
+            margin: 0;
+            font-weight: bold;
+        }
+        
+        .stats-card p {
+            margin: 5px 0 0 0;
+            opacity: 0.9;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .table-container {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .btn-upload {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 25px;
+            padding: 12px 30px;
+            color: white;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-upload:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .spinner-border {
+            color: #667eea;
+        }
+        
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="main-container">
+            <div class="text-center mb-5">
+                <h1 class="display-4 text-primary">
+                    <i class="fas fa-chart-line me-3"></i>
+                    Análisis de Trading Galáctico
+                </h1>
+                <p class="lead text-muted">Sube tu archivo CSV de operaciones y obtén análisis detallados con gráficos</p>
+            </div>
+
+            <!-- Área de subida de archivos -->
+            <div class="upload-area" id="uploadArea">
+                <i class="fas fa-cloud-upload-alt fa-3x text-primary mb-3"></i>
+                <h4>Arrastra tu archivo CSV aquí o haz clic para seleccionar</h4>
+                <p class="text-muted">Formato requerido: CSV con columnas de trading (exportalo de tradingcapital.ltd)</p>
+                <input type="file" id="fileInput" accept=".csv" style="display: none;">
+                <button class="btn btn-upload mt-3" onclick="document.getElementById('fileInput').click()">
+                    <i class="fas fa-upload me-2"></i>Seleccionar Archivo
+                </button>
+            </div>
+
+            <!-- Mensajes de estado -->
+            <div class="error-message" id="errorMessage"></div>
+            <div class="success-message" id="successMessage"></div>
+
+            <!-- Loading -->
+            <div class="loading" id="loading">
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Cargando...</span>
+                </div>
+                <p class="mt-2">Procesando archivo...</p>
+            </div>
+
+            <!-- Resultados del análisis -->
+            <div id="results" style="display: none;">
+                <!-- Resumen de métricas -->
+                <div class="row" id="summaryStats"></div>
+
+                <!-- Gráficos -->
+                <div class="row">
+                    <div class="col-lg-6">
+                        <div class="chart-container">
+                            <h5><i class="fas fa-chart-bar me-2"></i>Ganancia/Pérdida por Instrumento</h5>
+                            <div id="instrumentChart"></div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="chart-container">
+                            <h5><i class="fas fa-chart-line me-2"></i>Evolución Temporal</h5>
+                            <div id="evolutionChart"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tablas de datos -->
+                <div class="row">
+                    <div class="col-lg-6">
+                        <div class="table-container">
+                            <h5><i class="fas fa-table me-2"></i>Estadísticas por Mes</h5>
+                            <div class="table-responsive">
+                                <table class="table table-striped" id="monthlyTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Mes</th>
+                                            <th>Ganancia/Pérdida Total</th>
+                                            <th>Operaciones</th>
+                                            <th>Promedio</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="table-container">
+                            <h5><i class="fas fa-table me-2"></i>Estadísticas por Instrumento</h5>
+                            <div class="table-responsive">
+                                <table class="table table-striped" id="instrumentTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Instrumento</th>
+                                            <th>Ganancia/Pérdida Total</th>
+                                            <th>Operaciones</th>
+                                            <th>Promedio</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // Variables globales
+        let currentData = null;
+
+        // Event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            setupDragAndDrop();
+            setupFileInput();
+        });
+
+        function setupDragAndDrop() {
+            const uploadArea = document.getElementById('uploadArea');
+            
+            uploadArea.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            
+            uploadArea.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+            });
+            
+            uploadArea.addEventListener('drop', function(e) {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFile(files[0]);
+                }
+            });
+        }
+
+        function setupFileInput() {
+            const fileInput = document.getElementById('fileInput');
+            fileInput.addEventListener('change', function(e) {
+                if (e.target.files.length > 0) {
+                    handleFile(e.target.files[0]);
+                }
+            });
+        }
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.csv')) {
+                showError('Por favor, selecciona un archivo CSV válido.');
+                return;
+            }
+
+            uploadFile(file);
+        }
+
+        function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            showLoading(true);
+            hideMessages();
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                showLoading(false);
+                if (data.error) {
+                    showError(data.error);
+                } else {
+                    showSuccess('Archivo procesado correctamente. Mostrando análisis...');
+                    currentData = data;
+                    displayResults(data);
+                }
+            })
+            .catch(error => {
+                showLoading(false);
+                showError('Error al procesar el archivo: ' + error.message);
+            });
+        }
+
+        function displayResults(data) {
+            document.getElementById('results').style.display = 'block';
+            
+            // Mostrar resumen
+            displaySummary(data.summary);
+            
+            // Mostrar gráficos
+            displayCharts(data.charts);
+            
+            // Mostrar tablas
+            displayTables(data);
+        }
+
+        function displaySummary(summary) {
+            const summaryHtml = `
+                <div class="col-md-2">
+                    <div class="stats-card">
+                        <h3>${summary.total_operations}</h3>
+                        <p>Total Operaciones</p>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="stats-card">
+                        <h3>$${summary.total_profit.toLocaleString()}</h3>
+                        <p>Ganancia/Pérdida Total</p>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="stats-card">
+                        <h3>$${summary.total_swap.toLocaleString()}</h3>
+                        <p>Coste Total Swap</p>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="stats-card">
+                        <h3>${summary.winning_trades}</h3>
+                        <p>Operaciones Ganadoras</p>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="stats-card">
+                        <h3>${summary.losing_trades}</h3>
+                        <p>Operaciones Perdedoras</p>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="stats-card">
+                        <h3>${summary.win_rate}%</h3>
+                        <p>Porcentaje de Éxito</p>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('summaryStats').innerHTML = summaryHtml;
+        }
+
+        function displayCharts(charts) {
+            // Gráfico de instrumentos
+            Plotly.newPlot('instrumentChart', charts.instrument.data, charts.instrument.layout);
+            
+            // Gráfico de evolución
+            Plotly.newPlot('evolutionChart', charts.evolution.data, charts.evolution.layout);
+        }
+
+        function displayTables(data) {
+            // Tabla mensual
+            const monthlyTable = document.getElementById('monthlyTable').getElementsByTagName('tbody')[0];
+            monthlyTable.innerHTML = '';
+            
+            data.monthly_stats.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${row.Mes}</td>
+                    <td>$${row['Ganancia/Pérdida Total'].toLocaleString()}</td>
+                    <td>${row['Número Operaciones']}</td>
+                    <td>$${row['Ganancia/Pérdida Promedio'].toLocaleString()}</td>
+                `;
+                monthlyTable.appendChild(tr);
+            });
+
+            // Tabla de instrumentos
+            const instrumentTable = document.getElementById('instrumentTable').getElementsByTagName('tbody')[0];
+            instrumentTable.innerHTML = '';
+            
+            data.instrument_stats.forEach((row, index) => {
+                const tr = document.createElement('tr');
+                
+                // Si es la última fila (TOTAL), aplicar estilo destacado
+                if (row.Instrumentos === 'TOTAL') {
+                    tr.className = 'table-warning fw-bold';
+                }
+                
+                tr.innerHTML = `
+                    <td>${row.Instrumentos}</td>
+                    <td>$${row['Ganancia/Pérdida Total'].toLocaleString()}</td>
+                    <td>${row['Número Operaciones']}</td>
+                    <td>$${row['Ganancia/Pérdida Promedio'].toLocaleString()}</td>
+                `;
+                instrumentTable.appendChild(tr);
+            });
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function showSuccess(message) {
+            const successDiv = document.getElementById('successMessage');
+            successDiv.textContent = message;
+            successDiv.style.display = 'block';
+        }
+
+        function hideMessages() {
+            document.getElementById('errorMessage').style.display = 'none';
+            document.getElementById('successMessage').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
+

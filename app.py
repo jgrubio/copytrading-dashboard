@@ -34,8 +34,16 @@ def upload_file():
         return jsonify({'error': 'Only CSV files are allowed'}), 400
     
     try:
-        # Leer el archivo CSV
-        df = pd.read_csv(file)
+        # Generar nombre único para el archivo
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{timestamp}_{file.filename}"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        
+        # Guardar el archivo físicamente
+        file.save(filepath)
+        
+        # Leer el archivo CSV desde el archivo guardado
+        df = pd.read_csv(filepath)
         
         # Validar que tenga las columnas necesarias
         required_columns = ['ID', 'Instrumentos', 'Horario de apertura', 'Precio de apertura', 
@@ -226,6 +234,60 @@ def generate_charts(df, monthly_stats, instrument_stats, reason_stats):
     }
     
     return charts
+
+@app.route('/files')
+def list_files():
+    """Lista todos los archivos subidos"""
+    try:
+        files = []
+        for filename in os.listdir(UPLOAD_FOLDER):
+            if filename.endswith('.csv'):
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                file_stats = os.stat(filepath)
+                files.append({
+                    'filename': filename,
+                    'size': file_stats.st_size,
+                    'uploaded': datetime.fromtimestamp(file_stats.st_ctime).strftime('%Y-%m-%d %H:%M:%S')
+                })
+        
+        # Ordenar por fecha de subida (más reciente primero)
+        files.sort(key=lambda x: x['uploaded'], reverse=True)
+        return jsonify({'files': files})
+    except Exception as e:
+        return jsonify({'error': f'Error listing files: {str(e)}'}), 500
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    """Descarga un archivo específico"""
+    try:
+        # Validar que el archivo existe y es un CSV
+        if not filename.endswith('.csv'):
+            return jsonify({'error': 'Invalid file type'}), 400
+        
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        if not os.path.exists(filepath):
+            return jsonify({'error': 'File not found'}), 404
+        
+        return send_file(filepath, as_attachment=True)
+    except Exception as e:
+        return jsonify({'error': f'Error downloading file: {str(e)}'}), 500
+
+@app.route('/delete/<filename>', methods=['DELETE'])
+def delete_file(filename):
+    """Elimina un archivo específico"""
+    try:
+        # Validar que el archivo existe y es un CSV
+        if not filename.endswith('.csv'):
+            return jsonify({'error': 'Invalid file type'}), 400
+        
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        if not os.path.exists(filepath):
+            return jsonify({'error': 'File not found'}), 404
+        
+        os.remove(filepath)
+        return jsonify({'message': 'File deleted successfully'})
+    except Exception as e:
+        return jsonify({'error': f'Error deleting file: {str(e)}'}), 500
 
 
 if __name__ == '__main__':

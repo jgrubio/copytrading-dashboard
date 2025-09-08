@@ -129,10 +129,9 @@ dmypy.json
 .pyre/
 
 # Project specific
-uploads/
-*.csv
+uploads/*.csv
+!uploads/.gitkeep
 demo/
-templates/
 static/
 
 # IDE
