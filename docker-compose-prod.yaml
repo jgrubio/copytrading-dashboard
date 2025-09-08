@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  # Aplicación principal
+  copytrading-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: copytrading-dashboard
+    restart: unless-stopped
+    ports:
+      - "${EXTERNAL_PORT:-5000}:5000"
+    environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=false
+      - SECRET_KEY=${SECRET_KEY:-copytrading-dashboard-secret-key-2024-change-this}
+      - HOST=0.0.0.0
+      - PORT=5000
+      - HTTPS=${HTTPS:-false}
+      - UPLOAD_FOLDER=/app/uploads
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      # Usar bind mount directo para evitar problemas de permisos
+      - ${UPLOAD_PATH:-./uploads}:/app/uploads
+      # Volumen para logs
+      - logs_data:/app/logs
+    networks:
+      - copytrading-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Ejecutar como root temporalmente para configurar permisos
+    user: "0:0"
+    command: >
+      sh -c "
+        echo 'Configurando permisos...' &&
+        mkdir -p /app/uploads &&
+        chmod 777 /app/uploads &&
+        chown -R 1000:1000 /app/uploads 2>/dev/null || true &&
+        echo 'Cambiando a usuario appuser...' &&
+        exec gosu appuser gunicorn --config gunicorn.conf.py wsgi:application
+      "
+
+  # Servicio de limpieza de archivos antiguos (opcional)
+  cleanup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: copytrading-cleanup
+    restart: "no"
+    environment:
+      - UPLOAD_FOLDER=/app/uploads
+      - CLEANUP_DAYS=${CLEANUP_DAYS:-30}
+    volumes:
+      - ${UPLOAD_PATH:-./uploads}:/app/uploads
+    networks:
+      - copytrading-network
+    command: >
+      sh -c "
+        echo 'Iniciando limpieza de archivos antiguos...' &&
+        find /app/uploads -name '*.csv' -mtime +$${CLEANUP_DAYS:-30} -delete &&
+        echo 'Limpieza completada'
+      "
+    profiles:
+      - maintenance
+
+# Volúmenes persistentes
+volumes:
+  logs_data:
+    driver: local
+
+# Red personalizada
+networks:
+  copytrading-network:
+    driver: bridge

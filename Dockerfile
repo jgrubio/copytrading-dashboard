@@ -18,6 +18,7 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Crear directorio de trabajo
@@ -36,10 +37,11 @@ COPY . .
 # Crear directorio de uploads y dar permisos
 RUN mkdir -p uploads && \
     chown -R appuser:appuser /app && \
-    chmod 755 /app/uploads
+    chmod 755 /app/uploads && \
+    chmod 777 /app/uploads
 
 # Copiar y configurar script de entrada
-COPY entrypoint.sh /entrypoint.sh
+COPY entrypoint-prod.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Cambiar a usuario no-root
