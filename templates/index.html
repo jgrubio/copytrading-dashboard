@@ -129,6 +129,29 @@
             margin: 20px 0;
             display: none;
         }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            border: none;
+            border-radius: 25px;
+            padding: 15px 30px;
+            color: white;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
+        }
+        
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(40, 167, 69, 0.4);
+            background: linear-gradient(135deg, #218838 0%, #1ea085 100%);
+        }
+        
+        .btn-success:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
     </style>
 </head>
 <body>
@@ -167,6 +190,15 @@
 
             <!-- Resultados del análisis -->
             <div id="results" style="display: none;">
+                <!-- Botón de descarga PDF -->
+                <div class="row mb-4">
+                    <div class="col-12 text-center">
+                        <button class="btn btn-success btn-lg" id="downloadPdfBtn" onclick="downloadPDF()">
+                            <i class="fas fa-file-pdf me-2"></i>Descargar Análisis en PDF
+                        </button>
+                    </div>
+                </div>
+                
                 <!-- Resumen de métricas -->
                 <div class="row" id="summaryStats"></div>
 
@@ -433,6 +465,56 @@
         function hideMessages() {
             document.getElementById('errorMessage').style.display = 'none';
             document.getElementById('successMessage').style.display = 'none';
+        }
+
+        function downloadPDF() {
+            if (!currentData) {
+                showError('No hay datos para generar el PDF. Por favor, sube un archivo CSV primero.');
+                return;
+            }
+
+            const downloadBtn = document.getElementById('downloadPdfBtn');
+            const originalText = downloadBtn.innerHTML;
+            
+            // Mostrar estado de carga
+            downloadBtn.disabled = true;
+            downloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Generando PDF...';
+
+            fetch('/generate_pdf', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(currentData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Error al generar el PDF');
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                // Crear enlace de descarga
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `trading_analysis_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                showSuccess('PDF generado y descargado correctamente.');
+            })
+            .catch(error => {
+                showError('Error al generar el PDF: ' + error.message);
+            })
+            .finally(() => {
+                // Restaurar botón
+                downloadBtn.disabled = false;
+                downloadBtn.innerHTML = originalText;
+            });
         }
     </script>
 </body>

@@ -4,3 +4,6 @@ plotly>=5.18.0
 dash>=2.16.0
 dash-bootstrap-components>=1.5.0
 python-dateutil>=2.8.0
+reportlab>=4.0.0
+Pillow>=10.0.0
+kaleido>=0.2.1

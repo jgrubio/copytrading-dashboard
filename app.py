@@ -8,6 +8,14 @@ import os
 from datetime import datetime
 import io
 import base64
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+import plotly.io as pio
+import tempfile
 
 def create_app():
     app = Flask(__name__)
@@ -326,6 +334,220 @@ def delete_file(filename):
         return jsonify({'message': 'File deleted successfully'})
     except Exception as e:
         return jsonify({'error': f'Error deleting file: {str(e)}'}), 500
+
+@app.route('/generate_pdf', methods=['POST'])
+def generate_pdf():
+    """Genera un PDF con el análisis de trading"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Crear archivo PDF temporal
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            pdf_path = tmp_file.name
+        
+        # Generar el PDF
+        create_trading_pdf(data, pdf_path)
+        
+        # Enviar el archivo PDF
+        return send_file(
+            pdf_path,
+            as_attachment=True,
+            download_name=f'trading_analysis_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf',
+            mimetype='application/pdf'
+        )
+        
+    except Exception as e:
+        return jsonify({'error': f'Error generating PDF: {str(e)}'}), 500
+
+def create_trading_pdf(data, output_path):
+    """Crea un PDF con el análisis de trading"""
+    
+    # Configurar el documento
+    doc = SimpleDocTemplate(output_path, pagesize=A4)
+    story = []
+    styles = getSampleStyleSheet()
+    
+    # Estilos personalizados
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor('#667eea')
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=16,
+        spaceAfter=12,
+        spaceBefore=20,
+        textColor=colors.HexColor('#764ba2')
+    )
+    
+    # Título principal
+    story.append(Paragraph("Análisis de Trading Galáctico", title_style))
+    story.append(Spacer(1, 20))
+    
+    # Fecha de generación
+    date_style = ParagraphStyle(
+        'DateStyle',
+        parent=styles['Normal'],
+        fontSize=10,
+        alignment=TA_RIGHT,
+        textColor=colors.grey
+    )
+    story.append(Paragraph(f"Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", date_style))
+    story.append(Spacer(1, 30))
+    
+    # Resumen de métricas
+    story.append(Paragraph("Resumen de Métricas", heading_style))
+    
+    summary_data = data.get('summary', {})
+    summary_table_data = [
+        ['Métrica', 'Valor'],
+        ['Total de Operaciones', str(summary_data.get('total_operations', 0))],
+        ['Ganancia/Pérdida Total', f"${summary_data.get('total_profit', 0):,.2f}"],
+        ['Coste Total Swap', f"${summary_data.get('total_swap', 0):,.2f}"],
+        ['Operaciones Ganadoras', str(summary_data.get('winning_trades', 0))],
+        ['Operaciones Perdedoras', str(summary_data.get('losing_trades', 0))],
+        ['Porcentaje de Éxito', f"{summary_data.get('win_rate', 0):.2f}%"]
+    ]
+    
+    summary_table = Table(summary_table_data, colWidths=[3*inch, 2*inch])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    story.append(summary_table)
+    story.append(Spacer(1, 30))
+    
+    # Gráficos
+    charts = data.get('charts', {})
+    
+    # Gráfico de instrumentos
+    if 'instrument' in charts:
+        story.append(Paragraph("Ganancia/Pérdida por Instrumento", heading_style))
+        instrument_chart_path = create_chart_image(charts['instrument'], 'instrument')
+        if instrument_chart_path:
+            story.append(Image(instrument_chart_path, width=6*inch, height=4*inch))
+            story.append(Spacer(1, 20))
+    
+    # Gráfico de evolución temporal
+    if 'evolution' in charts:
+        story.append(Paragraph("Evolución Temporal de Ganancia/Pérdida", heading_style))
+        evolution_chart_path = create_chart_image(charts['evolution'], 'evolution')
+        if evolution_chart_path:
+            story.append(Image(evolution_chart_path, width=6*inch, height=4*inch))
+            story.append(Spacer(1, 20))
+    
+    # Tabla de estadísticas por mes
+    monthly_stats = data.get('monthly_stats', [])
+    if monthly_stats:
+        story.append(Paragraph("Estadísticas por Mes", heading_style))
+        
+        monthly_table_data = [['Mes', 'Ganancia/Pérdida Total', 'Operaciones', 'Promedio']]
+        for row in monthly_stats:
+            monthly_table_data.append([
+                str(row.get('Mes', '')),
+                f"${row.get('Ganancia/Pérdida Total', 0):,.2f}",
+                str(row.get('Número Operaciones', 0)),
+                f"${row.get('Ganancia/Pérdida Promedio', 0):,.2f}"
+            ])
+        
+        monthly_table = Table(monthly_table_data, colWidths=[1.5*inch, 1.5*inch, 1*inch, 1*inch])
+        monthly_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#764ba2')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTSIZE', (0, 1), (-1, -1), 8)
+        ]))
+        
+        story.append(monthly_table)
+        story.append(Spacer(1, 20))
+    
+    # Tabla de estadísticas por instrumento
+    instrument_stats = data.get('instrument_stats', [])
+    if instrument_stats:
+        story.append(Paragraph("Estadísticas por Instrumento", heading_style))
+        
+        instrument_table_data = [['Instrumento', 'Ganancia/Pérdida Total', 'Operaciones', 'Promedio']]
+        for row in instrument_stats:
+            instrument_table_data.append([
+                str(row.get('Instrumentos', '')),
+                f"${row.get('Ganancia/Pérdida Total', 0):,.2f}",
+                str(row.get('Número Operaciones', 0)),
+                f"${row.get('Ganancia/Pérdida Promedio', 0):,.2f}"
+            ])
+        
+        instrument_table = Table(instrument_table_data, colWidths=[2*inch, 1.5*inch, 1*inch, 1*inch])
+        instrument_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            # Destacar la fila TOTAL
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#ffeb3b')),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold')
+        ]))
+        
+        story.append(instrument_table)
+    
+    # Construir el PDF
+    doc.build(story)
+
+def create_chart_image(chart_data, chart_type):
+    """Crea una imagen del gráfico para incluir en el PDF"""
+    try:
+        # Crear figura de Plotly
+        if chart_type == 'instrument':
+            fig = go.Figure(data=chart_data['data'], layout=chart_data['layout'])
+        elif chart_type == 'evolution':
+            fig = go.Figure(data=chart_data['data'], layout=chart_data['layout'])
+        else:
+            return None
+        
+        # Configurar el layout para mejor visualización en PDF
+        fig.update_layout(
+            width=800,
+            height=600,
+            margin=dict(l=50, r=50, t=50, b=50),
+            paper_bgcolor='white',
+            plot_bgcolor='white'
+        )
+        
+        # Crear archivo temporal para la imagen
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_file:
+            image_path = tmp_file.name
+        
+        # Convertir a imagen
+        pio.write_image(fig, image_path, format='png', width=800, height=600, scale=2)
+        
+        return image_path
+        
+    except Exception as e:
+        print(f"Error creating chart image: {e}")
+        return None
 
 
 if __name__ == '__main__':
