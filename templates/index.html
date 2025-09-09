@@ -160,16 +160,16 @@
             <div class="text-center mb-5">
                 <h1 class="display-4 text-primary">
                     <i class="fas fa-chart-line me-3"></i>
-                    Análisis de Trading Galáctico
+                    <span id="mainTitle">Análisis de Trading Galáctico</span>
                 </h1>
-                <p class="lead text-muted">Sube tu archivo CSV de operaciones y obtén análisis detallados con gráficos</p>
+                <p class="lead text-muted" id="mainDescription">Sube tu archivo CSV de operaciones o finanzas y obtén análisis detallados con gráficos</p>
             </div>
 
             <!-- Área de subida de archivos -->
             <div class="upload-area" id="uploadArea">
                 <i class="fas fa-cloud-upload-alt fa-3x text-primary mb-3"></i>
                 <h4>Arrastra tu archivo CSV aquí o haz clic para seleccionar</h4>
-                <p class="text-muted">Formato requerido: CSV con columnas de trading (exportalo de tradingcapital.ltd)</p>
+                <p class="text-muted">Formatos soportados: CSV de posiciones cerradas o CSV de finanzas</p>
                 <input type="file" id="fileInput" accept=".csv" style="display: none;">
                 <button class="btn btn-upload mt-3" onclick="document.getElementById('fileInput').click()">
                     <i class="fas fa-upload me-2"></i>Seleccionar Archivo
@@ -203,59 +203,13 @@
                 <div class="row" id="summaryStats"></div>
 
                 <!-- Gráficos -->
-                <div class="row">
-                    <div class="col-lg-6">
-                        <div class="chart-container">
-                            <h5><i class="fas fa-chart-bar me-2"></i>Ganancia/Pérdida por Instrumento</h5>
-                            <div id="instrumentChart"></div>
-                        </div>
-                    </div>
-                    <div class="col-lg-6">
-                        <div class="chart-container">
-                            <h5><i class="fas fa-chart-line me-2"></i>Evolución Temporal</h5>
-                            <div id="evolutionChart"></div>
-                        </div>
-                    </div>
+                <div class="row" id="chartsContainer">
+                    <!-- Los gráficos se cargarán dinámicamente según el tipo de archivo -->
                 </div>
 
                 <!-- Tablas de datos -->
-                <div class="row">
-                    <div class="col-lg-6">
-                        <div class="table-container">
-                            <h5><i class="fas fa-table me-2"></i>Estadísticas por Mes</h5>
-                            <div class="table-responsive">
-                                <table class="table table-striped" id="monthlyTable">
-                                    <thead>
-                                        <tr>
-                                            <th>Mes</th>
-                                            <th>Ganancia/Pérdida Total</th>
-                                            <th>Operaciones</th>
-                                            <th>Promedio</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-lg-6">
-                        <div class="table-container">
-                            <h5><i class="fas fa-table me-2"></i>Estadísticas por Instrumento</h5>
-                            <div class="table-responsive">
-                                <table class="table table-striped" id="instrumentTable">
-                                    <thead>
-                                        <tr>
-                                            <th>Instrumento</th>
-                                            <th>Ganancia/Pérdida Total</th>
-                                            <th>Operaciones</th>
-                                            <th>Promedio</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
+                <div class="row" id="tablesContainer">
+                    <!-- Las tablas se cargarán dinámicamente según el tipo de archivo -->
                 </div>
             </div>
         </div>
@@ -347,103 +301,298 @@
         function displayResults(data) {
             document.getElementById('results').style.display = 'block';
             
+            // Detectar tipo de archivo y actualizar título
+            const fileType = data.file_type || 'trading';
+            updatePageTitle(fileType);
+            
             // Mostrar resumen
-            displaySummary(data.summary);
+            displaySummary(data.summary, fileType);
             
-            // Mostrar gráficos
-            displayCharts(data.charts);
+            // Mostrar tablas primero
+            displayTables(data, fileType);
             
-            // Mostrar tablas
-            displayTables(data);
+            // Mostrar gráficos después
+            displayCharts(data.charts, fileType);
         }
 
-        function displaySummary(summary) {
-            const summaryHtml = `
-                <div class="col-md-2">
-                    <div class="stats-card">
-                        <h3>${summary.total_operations}</h3>
-                        <p>Total Operaciones</p>
+        function updatePageTitle(fileType) {
+            const titleElement = document.getElementById('mainTitle');
+            const descriptionElement = document.getElementById('mainDescription');
+            
+            if (fileType === 'finance') {
+                titleElement.textContent = 'Análisis Financiero Galáctico';
+                descriptionElement.textContent = 'Análisis de transacciones financieras con gráficos y estadísticas detalladas';
+            } else {
+                titleElement.textContent = 'Análisis de Trading Galáctico';
+                descriptionElement.textContent = 'Análisis de operaciones de trading con gráficos y estadísticas detalladas';
+            }
+        }
+
+        function displaySummary(summary, fileType) {
+            let summaryHtml = '';
+            
+            if (fileType === 'finance') {
+                summaryHtml = `
+                    <div class="col-md-4">
+                        <div class="stats-card">
+                            <h3>${summary.deposit_transactions}</h3>
+                            <p>Depósitos</p>
+                        </div>
                     </div>
-                </div>
-                <div class="col-md-2">
-                    <div class="stats-card">
-                        <h3>$${summary.total_profit.toLocaleString()}</h3>
-                        <p>Ganancia/Pérdida Total</p>
+                    <div class="col-md-4">
+                        <div class="stats-card">
+                            <h3>$${summary.total_amount.toLocaleString()}</h3>
+                            <p>Monto Total</p>
+                        </div>
                     </div>
-                </div>
-                <div class="col-md-2">
-                    <div class="stats-card">
-                        <h3>$${summary.total_swap.toLocaleString()}</h3>
-                        <p>Coste Total Swap</p>
+                    <div class="col-md-4">
+                        <div class="stats-card">
+                            <h3>$${summary.avg_transaction.toLocaleString()}</h3>
+                            <p>Promedio por Transacción</p>
+                        </div>
                     </div>
-                </div>
-                <div class="col-md-2">
-                    <div class="stats-card">
-                        <h3>${summary.winning_trades}</h3>
-                        <p>Operaciones Ganadoras</p>
+                `;
+            } else {
+                summaryHtml = `
+                    <div class="col-md-2">
+                        <div class="stats-card">
+                            <h3>${summary.total_operations}</h3>
+                            <p>Total Operaciones</p>
+                        </div>
                     </div>
-                </div>
-                <div class="col-md-2">
-                    <div class="stats-card">
-                        <h3>${summary.losing_trades}</h3>
-                        <p>Operaciones Perdedoras</p>
+                    <div class="col-md-2">
+                        <div class="stats-card">
+                            <h3>$${summary.total_profit.toLocaleString()}</h3>
+                            <p>Ganancia/Pérdida Total</p>
+                        </div>
                     </div>
-                </div>
-                <div class="col-md-2">
-                    <div class="stats-card">
-                        <h3>${summary.win_rate}%</h3>
-                        <p>Porcentaje de Éxito</p>
+                    <div class="col-md-2">
+                        <div class="stats-card">
+                            <h3>$${summary.total_swap.toLocaleString()}</h3>
+                            <p>Coste Total Swap</p>
+                        </div>
                     </div>
-                </div>
-            `;
+                    <div class="col-md-2">
+                        <div class="stats-card">
+                            <h3>${summary.winning_trades}</h3>
+                            <p>Operaciones Ganadoras</p>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="stats-card">
+                            <h3>${summary.losing_trades}</h3>
+                            <p>Operaciones Perdedoras</p>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="stats-card">
+                            <h3>${summary.win_rate}%</h3>
+                            <p>Porcentaje de Éxito</p>
+                        </div>
+                    </div>
+                `;
+            }
             
             document.getElementById('summaryStats').innerHTML = summaryHtml;
         }
 
-        function displayCharts(charts) {
-            // Gráfico de instrumentos
-            Plotly.newPlot('instrumentChart', charts.instrument.data, charts.instrument.layout);
+        function displayCharts(charts, fileType) {
+            const chartsContainer = document.getElementById('chartsContainer');
+            chartsContainer.innerHTML = '';
             
-            // Gráfico de evolución
-            Plotly.newPlot('evolutionChart', charts.evolution.data, charts.evolution.layout);
+            if (fileType === 'finance') {
+                // Gráfico de evolución temporal
+                if (charts.evolution) {
+                    const evolutionDiv = document.createElement('div');
+                    evolutionDiv.className = 'col-lg-12';
+                    evolutionDiv.innerHTML = `
+                        <div class="chart-container">
+                            <h5><i class="fas fa-chart-line me-2"></i>Evolución del Monto Acumulado</h5>
+                            <div id="evolutionChart"></div>
+                        </div>
+                    `;
+                    chartsContainer.appendChild(evolutionDiv);
+                    Plotly.newPlot('evolutionChart', charts.evolution.data, charts.evolution.layout);
+                }
+            } else {
+                // Gráfico de instrumentos
+                if (charts.instrument) {
+                    const instrumentDiv = document.createElement('div');
+                    instrumentDiv.className = 'col-lg-6';
+                    instrumentDiv.innerHTML = `
+                        <div class="chart-container">
+                            <h5><i class="fas fa-chart-bar me-2"></i>Ganancia/Pérdida por Instrumento</h5>
+                            <div id="instrumentChart"></div>
+                        </div>
+                    `;
+                    chartsContainer.appendChild(instrumentDiv);
+                    Plotly.newPlot('instrumentChart', charts.instrument.data, charts.instrument.layout);
+                }
+                
+                // Gráfico de evolución temporal
+                if (charts.evolution) {
+                    const evolutionDiv = document.createElement('div');
+                    evolutionDiv.className = 'col-lg-6';
+                    evolutionDiv.innerHTML = `
+                        <div class="chart-container">
+                            <h5><i class="fas fa-chart-line me-2"></i>Evolución Temporal</h5>
+                            <div id="evolutionChart"></div>
+                        </div>
+                    `;
+                    chartsContainer.appendChild(evolutionDiv);
+                    Plotly.newPlot('evolutionChart', charts.evolution.data, charts.evolution.layout);
+                }
+            }
         }
 
-        function displayTables(data) {
+        function displayTables(data, fileType) {
+            const tablesContainer = document.getElementById('tablesContainer');
+            tablesContainer.innerHTML = '';
+            
             // Tabla mensual
+            const monthlyDiv = document.createElement('div');
+            monthlyDiv.className = fileType === 'finance' ? 'col-lg-12' : 'col-lg-6';
+            
+            if (fileType === 'finance') {
+                monthlyDiv.innerHTML = `
+                    <div class="table-container">
+                        <h5><i class="fas fa-table me-2"></i>Estadísticas por Mes</h5>
+                        <div class="table-responsive">
+                            <table class="table table-striped" id="monthlyTable">
+                                <thead>
+                                    <tr>
+                                        <th>Mes</th>
+                                        <th>Monto Total</th>
+                                        <th>Transacciones</th>
+                                        <th>Promedio</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            } else {
+                monthlyDiv.innerHTML = `
+                    <div class="table-container">
+                        <h5><i class="fas fa-table me-2"></i>Estadísticas por Mes</h5>
+                        <div class="table-responsive">
+                            <table class="table table-striped" id="monthlyTable">
+                                <thead>
+                                    <tr>
+                                        <th>Mes</th>
+                                        <th>Ganancia/Pérdida Total</th>
+                                        <th>Operaciones</th>
+                                        <th>Promedio</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            tablesContainer.appendChild(monthlyDiv);
+            
+            // Solo mostrar tabla de instrumentos para archivos de trading
+            if (fileType !== 'finance') {
+                const typeDiv = document.createElement('div');
+                typeDiv.className = 'col-lg-6';
+                
+                typeDiv.innerHTML = `
+                    <div class="table-container">
+                        <h5><i class="fas fa-table me-2"></i>Estadísticas por Instrumento</h5>
+                        <div class="table-responsive">
+                            <table class="table table-striped" id="instrumentTable">
+                                <thead>
+                                    <tr>
+                                        <th>Instrumento</th>
+                                        <th>Ganancia/Pérdida Total</th>
+                                        <th>Operaciones</th>
+                                        <th>Promedio</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+                
+                tablesContainer.appendChild(typeDiv);
+            }
+            
+            // Llenar tabla mensual
             const monthlyTable = document.getElementById('monthlyTable').getElementsByTagName('tbody')[0];
             monthlyTable.innerHTML = '';
             
             data.monthly_stats.forEach(row => {
                 const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td>${row.Mes}</td>
-                    <td>$${row['Ganancia/Pérdida Total'].toLocaleString()}</td>
-                    <td>${row['Número Operaciones']}</td>
-                    <td>$${row['Ganancia/Pérdida Promedio'].toLocaleString()}</td>
-                `;
+                if (fileType === 'finance') {
+                    tr.innerHTML = `
+                        <td>${row.Mes}</td>
+                        <td>$${row['Monto Total'].toLocaleString()}</td>
+                        <td>${row['Número Transacciones']}</td>
+                        <td>$${row['Monto Promedio'].toLocaleString()}</td>
+                    `;
+                } else {
+                    tr.innerHTML = `
+                        <td>${row.Mes}</td>
+                        <td>$${row['Ganancia/Pérdida Total'].toLocaleString()}</td>
+                        <td>${row['Número Operaciones']}</td>
+                        <td>$${row['Ganancia/Pérdida Promedio'].toLocaleString()}</td>
+                    `;
+                }
                 monthlyTable.appendChild(tr);
             });
-
-            // Tabla de instrumentos
-            const instrumentTable = document.getElementById('instrumentTable').getElementsByTagName('tbody')[0];
-            instrumentTable.innerHTML = '';
             
-            data.instrument_stats.forEach((row, index) => {
-                const tr = document.createElement('tr');
+            // Agregar fila de totales para archivos de finanzas
+            if (fileType === 'finance') {
+                const totalRow = document.createElement('tr');
+                totalRow.className = 'table-warning fw-bold';
                 
-                // Si es la última fila (TOTAL), aplicar estilo destacado
-                if (row.Instrumentos === 'TOTAL') {
-                    tr.className = 'table-warning fw-bold';
-                }
+                // Calcular totales
+                const totalAmount = data.monthly_stats.reduce((sum, row) => sum + row['Monto Total'], 0);
+                const totalTransactions = data.monthly_stats.reduce((sum, row) => sum + row['Número Transacciones'], 0);
+                const avgAmount = totalTransactions > 0 ? totalAmount / totalTransactions : 0;
                 
-                tr.innerHTML = `
-                    <td>${row.Instrumentos}</td>
-                    <td>$${row['Ganancia/Pérdida Total'].toLocaleString()}</td>
-                    <td>${row['Número Operaciones']}</td>
-                    <td>$${row['Ganancia/Pérdida Promedio'].toLocaleString()}</td>
+                totalRow.innerHTML = `
+                    <td>TOTAL</td>
+                    <td>$${totalAmount.toLocaleString()}</td>
+                    <td>${totalTransactions}</td>
+                    <td>$${avgAmount.toLocaleString()}</td>
                 `;
-                instrumentTable.appendChild(tr);
-            });
+                monthlyTable.appendChild(totalRow);
+            }
+
+            // Solo llenar tabla de instrumentos para archivos de trading
+            if (fileType !== 'finance' && data.instrument_stats) {
+                const typeTable = document.getElementById('instrumentTable').getElementsByTagName('tbody')[0];
+                typeTable.innerHTML = '';
+                
+                const statsData = data.instrument_stats;
+                const keyField = 'Instrumentos';
+                const totalField = 'Ganancia/Pérdida Total';
+                const countField = 'Número Operaciones';
+                const avgField = 'Ganancia/Pérdida Promedio';
+                
+                statsData.forEach((row, index) => {
+                    const tr = document.createElement('tr');
+                    
+                    // Si es la última fila (TOTAL), aplicar estilo destacado
+                    if (row[keyField] === 'TOTAL') {
+                        tr.className = 'table-warning fw-bold';
+                    }
+                    
+                    tr.innerHTML = `
+                        <td>${row[keyField]}</td>
+                        <td>$${row[totalField].toLocaleString()}</td>
+                        <td>${row[countField]}</td>
+                        <td>$${row[avgField].toLocaleString()}</td>
+                    `;
+                    typeTable.appendChild(tr);
+                });
+            }
         }
 
         function showLoading(show) {

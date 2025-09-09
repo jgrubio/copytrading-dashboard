@@ -89,18 +89,68 @@ def upload_file():
         file.save(filepath)
         
         # Leer el archivo CSV desde el archivo guardado
-        df = pd.read_csv(filepath)
+        # Primero intentar leer con pandas normal
+        try:
+            df = pd.read_csv(filepath)
+        except pd.errors.ParserError as e:
+            # Si hay error de parsing, usar método manual
+            import csv
+            rows = []
+            with open(filepath, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                headers = next(reader)
+                for row in reader:
+                    # Si la fila tiene más columnas que headers, combinar las últimas
+                    if len(row) > len(headers):
+                        # Combinar las últimas columnas en el campo Detalles
+                        row = row[:len(headers)-1] + [', '.join(row[len(headers)-1:])]
+                    elif len(row) < len(headers):
+                        # Rellenar con valores vacíos si faltan columnas
+                        row.extend([''] * (len(headers) - len(row)))
+                    rows.append(row)
+            df = pd.DataFrame(rows, columns=headers)
         
-        # Validar que tenga las columnas necesarias
-        required_columns = ['ID', 'Instrumentos', 'Horario de apertura', 'Precio de apertura', 
-                           'Precio de cierre', 'Utilidad', 'Razón']
+        # Verificar si es un archivo de finanzas y si tiene problemas de parsing
+        if 'Monto' in df.columns:
+            # Para archivos de finanzas, verificar si el parsing fue correcto
+            # Si la columna "Pasarela de pago" no contiene "Manual", hay un problema de parsing
+            if not (df['Pasarela de pago'] == 'Manual').any():
+                # Releer el archivo manualmente para corregir el parsing
+                import csv
+                rows = []
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    headers = next(reader)
+                    for row in reader:
+                        # Si la fila tiene más columnas que headers, combinar las últimas
+                        if len(row) > len(headers):
+                            # Combinar las últimas columnas en el campo Detalles
+                            row = row[:len(headers)-1] + [', '.join(row[len(headers)-1:])]
+                        rows.append(row)
+                df = pd.DataFrame(rows, columns=headers)
         
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            return jsonify({'error': f'Missing required columns: {missing_columns}'}), 400
         
-        # Procesar los datos
-        analysis_data = process_trading_data(df)
+        # Detectar tipo de archivo basado en la presencia de la columna "Monto"
+        if 'Monto' in df.columns:
+            # Es un archivo de finanzas
+            required_columns = ['Tipo', 'Tiempo', 'Monto', 'Estatus', 'Pasarela de pago', 'Detalles']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                return jsonify({'error': f'Missing required columns for finance file: {missing_columns}'}), 400
+            
+            # Procesar los datos de finanzas
+            analysis_data = process_finance_data(df)
+        else:
+            # Es un archivo de posiciones cerradas (formato original)
+            required_columns = ['ID', 'Instrumentos', 'Horario de apertura', 'Precio de apertura', 
+                               'Precio de cierre', 'Utilidad', 'Razón']
+            
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                return jsonify({'error': f'Missing required columns for trading file: {missing_columns}'}), 400
+            
+            # Procesar los datos de trading
+            analysis_data = process_trading_data(df)
         
         return jsonify(analysis_data)
         
@@ -281,6 +331,145 @@ def generate_charts(df, monthly_stats, instrument_stats, reason_stats):
     
     return charts
 
+def process_finance_data(df):
+    """Procesa los datos de finanzas y genera análisis"""
+    
+    # Convertir fechas con manejo de errores
+    df['Tiempo'] = pd.to_datetime(df['Tiempo'], errors='coerce', format='mixed')
+    
+    # Filtrar solo filas con fechas válidas
+    df_valid = df.dropna(subset=['Tiempo'])
+    
+    # Filtrar solo transacciones de tipo "Depósito" y "Manual" en la columna "Pasarela de pago"
+    df_manual = df_valid[(df_valid['Tipo'] == 'Depósito') & (df_valid['Pasarela de pago'] == 'Manual')].copy()
+    
+    # Convertir Monto a numérico
+    df_manual['Monto'] = pd.to_numeric(df_manual['Monto'], errors='coerce')
+    
+    # Extraer mes y año
+    df_manual['Mes'] = df_manual['Tiempo'].dt.to_period('M')
+    df_manual['Año'] = df_manual['Tiempo'].dt.year
+    
+    # Calcular agregado por mes
+    monthly_finance = df_manual.groupby('Mes').agg({
+        'Monto': ['sum', 'count', 'mean']
+    }).round(2)
+    
+    monthly_finance.columns = ['Monto Total', 'Número Transacciones', 'Monto Promedio']
+    monthly_finance = monthly_finance.reset_index()
+    monthly_finance['Mes'] = monthly_finance['Mes'].astype(str)
+    
+    # Calcular métricas por tipo de transacción
+    type_stats = df_manual.groupby('Tipo').agg({
+        'Monto': ['sum', 'count', 'mean']
+    }).round(2)
+    
+    type_stats.columns = ['Monto Total', 'Número Transacciones', 'Monto Promedio']
+    type_stats = type_stats.reset_index()
+    
+    # Calcular totales para la fila de sumatorio
+    type_totals = {
+        'Tipo': 'TOTAL',
+        'Monto Total': type_stats['Monto Total'].sum(),
+        'Número Transacciones': type_stats['Número Transacciones'].sum(),
+        'Monto Promedio': type_stats['Monto Total'].sum() / type_stats['Número Transacciones'].sum() if type_stats['Número Transacciones'].sum() > 0 else 0
+    }
+    
+    # Agregar la fila de totales al final
+    type_stats = pd.concat([type_stats, pd.DataFrame([type_totals])], ignore_index=True)
+    
+    # Métricas generales
+    total_transactions = len(df_manual)
+    total_amount = df_manual['Monto'].sum()
+    deposit_transactions = len(df_manual[df_manual['Tipo'] == 'Depósito'])
+    avg_transaction = df_manual['Monto'].mean()
+    
+    # Generar gráficos
+    charts = generate_finance_charts(df_manual, monthly_finance, type_stats)
+    
+    return {
+        'file_type': 'finance',
+        'summary': {
+            'deposit_transactions': deposit_transactions,
+            'total_amount': round(total_amount, 2),
+            'avg_transaction': round(avg_transaction, 2)
+        },
+        'monthly_stats': monthly_finance.to_dict('records'),
+        'charts': charts
+    }
+
+def generate_finance_charts(df, monthly_finance, type_stats):
+    """Genera los gráficos de análisis financiero"""
+    
+    # 1. Gráfico de monto por mes
+    fig_monthly = px.bar(
+        monthly_finance,
+        x='Mes',
+        y='Monto Total',
+        title='Monto Total por Mes (Transacciones Manuales)',
+        color='Monto Total',
+        color_continuous_scale='Blues',
+        height=500
+    )
+    
+    fig_monthly.update_layout(
+        xaxis_title='Mes',
+        yaxis_title='Monto Total ($)',
+        showlegend=False,
+        xaxis={'tickangle': 45}
+    )
+    
+    # 2. Gráfico de evolución temporal
+    df_sorted = df.sort_values('Tiempo').copy()
+    df_sorted['Monto Acumulado'] = df_sorted['Monto'].cumsum()
+    
+    fig_evolution = px.line(
+        df_sorted,
+        x='Tiempo',
+        y='Monto Acumulado',
+        title='Evolución del Monto Acumulado en el Tiempo',
+        height=500
+    )
+    
+    fig_evolution.update_layout(
+        xaxis_title='Fecha',
+        yaxis_title='Monto Acumulado ($)',
+        showlegend=False,
+        hovermode='x unified'
+    )
+    
+    # 3. Gráfico de tipo de transacción
+    type_stats_for_chart = type_stats[type_stats['Tipo'] != 'TOTAL'].copy()
+    
+    fig_type = px.pie(
+        type_stats_for_chart,
+        values='Monto Total',
+        names='Tipo',
+        title='Distribución por Tipo de Transacción',
+        height=500
+    )
+    
+    # Convertir gráficos a JSON con datos explícitos
+    charts = {
+        'evolution': {
+            'data': [{
+                'x': df_sorted['Tiempo'].dt.strftime('%Y-%m-%d %H:%M:%S').tolist(),
+                'y': df_sorted['Monto Acumulado'].tolist(),
+                'type': 'scatter',
+                'mode': 'lines',
+                'name': 'Monto Acumulado'
+            }],
+            'layout': {
+                'title': 'Evolución del Monto Acumulado',
+                'xaxis': {'title': 'Fecha'},
+                'yaxis': {'title': 'Monto Acumulado ($)'},
+                'height': 500
+            }
+        }
+    }
+    
+    return charts
+
 @app.route('/files')
 def list_files():
     """Lista todos los archivos subidos"""
@@ -348,7 +537,7 @@ def generate_pdf():
             pdf_path = tmp_file.name
         
         # Generar el PDF
-        create_trading_pdf(data, pdf_path)
+        create_analysis_pdf(data, pdf_path)
         
         # Enviar el archivo PDF
         return send_file(
@@ -361,8 +550,8 @@ def generate_pdf():
     except Exception as e:
         return jsonify({'error': f'Error generating PDF: {str(e)}'}), 500
 
-def create_trading_pdf(data, output_path):
-    """Crea un PDF con el análisis de trading"""
+def create_analysis_pdf(data, output_path):
+    """Crea un PDF con el análisis (trading o finanzas)"""
     
     # Configurar el documento
     doc = SimpleDocTemplate(output_path, pagesize=A4)
@@ -388,8 +577,14 @@ def create_trading_pdf(data, output_path):
         textColor=colors.HexColor('#764ba2')
     )
     
+    # Detectar tipo de archivo
+    file_type = data.get('file_type', 'trading')
+    
     # Título principal
-    story.append(Paragraph("Análisis de Trading Galáctico", title_style))
+    if file_type == 'finance':
+        story.append(Paragraph("Análisis Financiero Galáctico", title_style))
+    else:
+        story.append(Paragraph("Análisis de Trading Galáctico", title_style))
     story.append(Spacer(1, 20))
     
     # Fecha de generación
@@ -407,15 +602,26 @@ def create_trading_pdf(data, output_path):
     story.append(Paragraph("Resumen de Métricas", heading_style))
     
     summary_data = data.get('summary', {})
-    summary_table_data = [
-        ['Métrica', 'Valor'],
-        ['Total de Operaciones', str(summary_data.get('total_operations', 0))],
-        ['Ganancia/Pérdida Total', f"${summary_data.get('total_profit', 0):,.2f}"],
-        ['Coste Total Swap', f"${summary_data.get('total_swap', 0):,.2f}"],
-        ['Operaciones Ganadoras', str(summary_data.get('winning_trades', 0))],
-        ['Operaciones Perdedoras', str(summary_data.get('losing_trades', 0))],
-        ['Porcentaje de Éxito', f"{summary_data.get('win_rate', 0):.2f}%"]
-    ]
+    
+    if file_type == 'finance':
+        summary_table_data = [
+            ['Métrica', 'Valor'],
+            ['Total de Transacciones', str(summary_data.get('total_transactions', 0))],
+            ['Monto Total', f"${summary_data.get('total_amount', 0):,.2f}"],
+            ['Transacciones de Depósito', str(summary_data.get('deposit_transactions', 0))],
+            ['Transacciones de Retiro', str(summary_data.get('withdrawal_transactions', 0))],
+            ['Monto Promedio por Transacción', f"${summary_data.get('avg_transaction', 0):,.2f}"]
+        ]
+    else:
+        summary_table_data = [
+            ['Métrica', 'Valor'],
+            ['Total de Operaciones', str(summary_data.get('total_operations', 0))],
+            ['Ganancia/Pérdida Total', f"${summary_data.get('total_profit', 0):,.2f}"],
+            ['Coste Total Swap', f"${summary_data.get('total_swap', 0):,.2f}"],
+            ['Operaciones Ganadoras', str(summary_data.get('winning_trades', 0))],
+            ['Operaciones Perdedoras', str(summary_data.get('losing_trades', 0))],
+            ['Porcentaje de Éxito', f"{summary_data.get('win_rate', 0):.2f}%"]
+        ]
     
     summary_table = Table(summary_table_data, colWidths=[3*inch, 2*inch])
     summary_table.setStyle(TableStyle([
@@ -435,35 +641,70 @@ def create_trading_pdf(data, output_path):
     # Gráficos
     charts = data.get('charts', {})
     
-    # Gráfico de instrumentos
-    if 'instrument' in charts:
-        story.append(Paragraph("Ganancia/Pérdida por Instrumento", heading_style))
-        instrument_chart_path = create_chart_image(charts['instrument'], 'instrument')
-        if instrument_chart_path:
-            story.append(Image(instrument_chart_path, width=6*inch, height=4*inch))
-            story.append(Spacer(1, 20))
-    
-    # Gráfico de evolución temporal
-    if 'evolution' in charts:
-        story.append(Paragraph("Evolución Temporal de Ganancia/Pérdida", heading_style))
-        evolution_chart_path = create_chart_image(charts['evolution'], 'evolution')
-        if evolution_chart_path:
-            story.append(Image(evolution_chart_path, width=6*inch, height=4*inch))
-            story.append(Spacer(1, 20))
+    if file_type == 'finance':
+        # Gráfico de monto por mes
+        if 'monthly' in charts:
+            story.append(Paragraph("Monto Total por Mes", heading_style))
+            monthly_chart_path = create_chart_image(charts['monthly'], 'monthly')
+            if monthly_chart_path:
+                story.append(Image(monthly_chart_path, width=6*inch, height=4*inch))
+                story.append(Spacer(1, 20))
+        
+        # Gráfico de evolución temporal
+        if 'evolution' in charts:
+            story.append(Paragraph("Evolución Temporal del Monto Acumulado", heading_style))
+            evolution_chart_path = create_chart_image(charts['evolution'], 'evolution')
+            if evolution_chart_path:
+                story.append(Image(evolution_chart_path, width=6*inch, height=4*inch))
+                story.append(Spacer(1, 20))
+        
+        # Gráfico de distribución por tipo
+        if 'type_distribution' in charts:
+            story.append(Paragraph("Distribución por Tipo de Transacción", heading_style))
+            type_chart_path = create_chart_image(charts['type_distribution'], 'type_distribution')
+            if type_chart_path:
+                story.append(Image(type_chart_path, width=6*inch, height=4*inch))
+                story.append(Spacer(1, 20))
+    else:
+        # Gráfico de instrumentos
+        if 'instrument' in charts:
+            story.append(Paragraph("Ganancia/Pérdida por Instrumento", heading_style))
+            instrument_chart_path = create_chart_image(charts['instrument'], 'instrument')
+            if instrument_chart_path:
+                story.append(Image(instrument_chart_path, width=6*inch, height=4*inch))
+                story.append(Spacer(1, 20))
+        
+        # Gráfico de evolución temporal
+        if 'evolution' in charts:
+            story.append(Paragraph("Evolución Temporal de Ganancia/Pérdida", heading_style))
+            evolution_chart_path = create_chart_image(charts['evolution'], 'evolution')
+            if evolution_chart_path:
+                story.append(Image(evolution_chart_path, width=6*inch, height=4*inch))
+                story.append(Spacer(1, 20))
     
     # Tabla de estadísticas por mes
     monthly_stats = data.get('monthly_stats', [])
     if monthly_stats:
         story.append(Paragraph("Estadísticas por Mes", heading_style))
         
-        monthly_table_data = [['Mes', 'Ganancia/Pérdida Total', 'Operaciones', 'Promedio']]
-        for row in monthly_stats:
-            monthly_table_data.append([
-                str(row.get('Mes', '')),
-                f"${row.get('Ganancia/Pérdida Total', 0):,.2f}",
-                str(row.get('Número Operaciones', 0)),
-                f"${row.get('Ganancia/Pérdida Promedio', 0):,.2f}"
-            ])
+        if file_type == 'finance':
+            monthly_table_data = [['Mes', 'Monto Total', 'Transacciones', 'Promedio']]
+            for row in monthly_stats:
+                monthly_table_data.append([
+                    str(row.get('Mes', '')),
+                    f"${row.get('Monto Total', 0):,.2f}",
+                    str(row.get('Número Transacciones', 0)),
+                    f"${row.get('Monto Promedio', 0):,.2f}"
+                ])
+        else:
+            monthly_table_data = [['Mes', 'Ganancia/Pérdida Total', 'Operaciones', 'Promedio']]
+            for row in monthly_stats:
+                monthly_table_data.append([
+                    str(row.get('Mes', '')),
+                    f"${row.get('Ganancia/Pérdida Total', 0):,.2f}",
+                    str(row.get('Número Operaciones', 0)),
+                    f"${row.get('Ganancia/Pérdida Promedio', 0):,.2f}"
+                ])
         
         monthly_table = Table(monthly_table_data, colWidths=[1.5*inch, 1.5*inch, 1*inch, 1*inch])
         monthly_table.setStyle(TableStyle([
@@ -481,37 +722,69 @@ def create_trading_pdf(data, output_path):
         story.append(monthly_table)
         story.append(Spacer(1, 20))
     
-    # Tabla de estadísticas por instrumento
-    instrument_stats = data.get('instrument_stats', [])
-    if instrument_stats:
-        story.append(Paragraph("Estadísticas por Instrumento", heading_style))
-        
-        instrument_table_data = [['Instrumento', 'Ganancia/Pérdida Total', 'Operaciones', 'Promedio']]
-        for row in instrument_stats:
-            instrument_table_data.append([
-                str(row.get('Instrumentos', '')),
-                f"${row.get('Ganancia/Pérdida Total', 0):,.2f}",
-                str(row.get('Número Operaciones', 0)),
-                f"${row.get('Ganancia/Pérdida Promedio', 0):,.2f}"
-            ])
-        
-        instrument_table = Table(instrument_table_data, colWidths=[2*inch, 1.5*inch, 1*inch, 1*inch])
-        instrument_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
-            # Destacar la fila TOTAL
-            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#ffeb3b')),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold')
-        ]))
-        
-        story.append(instrument_table)
+    # Tabla de estadísticas por tipo/instrumento
+    if file_type == 'finance':
+        type_stats = data.get('type_stats', [])
+        if type_stats:
+            story.append(Paragraph("Estadísticas por Tipo de Transacción", heading_style))
+            
+            type_table_data = [['Tipo', 'Monto Total', 'Transacciones', 'Promedio']]
+            for row in type_stats:
+                type_table_data.append([
+                    str(row.get('Tipo', '')),
+                    f"${row.get('Monto Total', 0):,.2f}",
+                    str(row.get('Número Transacciones', 0)),
+                    f"${row.get('Monto Promedio', 0):,.2f}"
+                ])
+            
+            type_table = Table(type_table_data, colWidths=[2*inch, 1.5*inch, 1*inch, 1*inch])
+            type_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                # Destacar la fila TOTAL
+                ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#ffeb3b')),
+                ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold')
+            ]))
+            
+            story.append(type_table)
+    else:
+        instrument_stats = data.get('instrument_stats', [])
+        if instrument_stats:
+            story.append(Paragraph("Estadísticas por Instrumento", heading_style))
+            
+            instrument_table_data = [['Instrumento', 'Ganancia/Pérdida Total', 'Operaciones', 'Promedio']]
+            for row in instrument_stats:
+                instrument_table_data.append([
+                    str(row.get('Instrumentos', '')),
+                    f"${row.get('Ganancia/Pérdida Total', 0):,.2f}",
+                    str(row.get('Número Operaciones', 0)),
+                    f"${row.get('Ganancia/Pérdida Promedio', 0):,.2f}"
+                ])
+            
+            instrument_table = Table(instrument_table_data, colWidths=[2*inch, 1.5*inch, 1*inch, 1*inch])
+            instrument_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                # Destacar la fila TOTAL
+                ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#ffeb3b')),
+                ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold')
+            ]))
+            
+            story.append(instrument_table)
     
     # Construir el PDF
     doc.build(story)
@@ -520,9 +793,7 @@ def create_chart_image(chart_data, chart_type):
     """Crea una imagen del gráfico para incluir en el PDF"""
     try:
         # Crear figura de Plotly
-        if chart_type == 'instrument':
-            fig = go.Figure(data=chart_data['data'], layout=chart_data['layout'])
-        elif chart_type == 'evolution':
+        if chart_type in ['instrument', 'monthly', 'evolution', 'type_distribution']:
             fig = go.Figure(data=chart_data['data'], layout=chart_data['layout'])
         else:
             return None
